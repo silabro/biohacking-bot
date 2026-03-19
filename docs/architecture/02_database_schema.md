@@ -1,0 +1,21 @@
+## 4. Схема базы данных (SQLAlchemy Models)
+
+*Модели данных жестко нормализованы. Обязательны композитные индексы (Composite Indexes) по `(user_id, date)` для всех таблиц логов.*
+
+**Timezone Nightmare Rule:** Жесткое правило: все даты/время в логах PostgreSQL хранятся ИСКЛЮЧИТЕЛЬНО в UTC (`TIMESTAMP WITH TIME ZONE`).
+
+**JSONB Schema Drift Rule:** Запрещено использовать `default=None` при добавлении новых полей в Pydantic-схемы. Разработчик обязан применять **Sensible Defaults** (например, `fiber: float = 0.0`) и паттерн **On-the-fly Migration**: использовать декоратор `@model_validator(mode='before')` в Pydantic для перехвата и обогащения старых записей из БД недостающими ключами "на лету" перед валидацией. Использование GIN-индексов обязательно.
+
+1.  **`users`**: `id` (PK), `telegram_id` (Unique), `has_accepted_policy`, `city`, `timezone` (String, default: "Europe/Moscow"), `is_traveling` (Boolean, default: False), `age`, `gender`, `height`, `weight`, `activity_level`, `calories_goal`, `active_ration_id`, `baseline_sleep_hours`, `dietary_preferences` (JSONB), `diseases`, `allergies`, `kitchen_equipment` (JSONB), `fitness_equipment` (JSONB), `fitness_capacity` (JSONB - `baseline_rhr`, `vo2_max`, `lactate_threshold`, `mrv_sets`, `acwr_rolling`, `predicted_1rm`, `red_flags`), `meal_schedule` (JSONB), `water_preferences` (JSONB), `wearable_tokens` (JSONB - шифруется симметрично через Application-Level Encryption `MultiFernet`), `menstrual_cycle_data` (JSONB), `data_completeness_score` (Integer, 0-100), `last_active_at` (TIMESTAMP WITH TIME ZONE).
+    *   **`daily_ai_requests` (Integer, default: 5):** Лимит списывается **ТОЛЬКО** при полном запуске Консилиума. *Системные фоновые задачи (Утренний дайджест, Стратегия, Smart Fridge Audit) выполняются вне пользовательского лимита и НЕ расходуют квоту.*
+2.  **`user_protocols`**: `id` (PK), `user_id` (FK), `goal`, `medical_constraints_json` (JSONB), `active_until`.
+3.  **`user_recipes` (Smart Chef Blindspot Fix)**: `id` (PK), `user_id` (FK), `name`, `macros_json` (JSONB), `ingredients_json` (JSONB), `instructions` (Text), `is_estimated` (Boolean - для Cheat Meals), `created_at`.
+4.  **`fridge_items`**: `id` (PK), `user_id` (FK), `name`, `calories`, `proteins`, `fats`, `carbs`, `fiber` (Float), `food_matrix_json` (JSONB), `is_supplement`, `is_staple` (Boolean - **Smart Pantry** для бакалеи, ИИ использует свободно, не списывается из БД), `quantity`, `unit` (SQLAlchemy Enum: 'g', 'ml'), `price_per_unit` (Float - Moving Avg), `price_updated_at`, `is_expired` (Boolean, hidden flag). База физически отвергнет попытку записи других мер.
+5.  **`substance_interactions` (ATC Conflict Matrix)**: `id` (PK), `atc_code_a` (String - Класс АТХ), `atc_code_b` (String - Класс АТХ), `interaction_type` (String - CYP450_antagonist, absorption_blocker), `description` (Text), `severity` (String).
+6.  **`supplements_log`**: `id` (PK), `user_id` (FK), `name`, `dosage`, `circadian_anchor` (String), `taken_at`.
+7.  **`medications_log`**: `id` (PK), `user_id` (FK), `name`, `dosage`, `pharmacokinetics_json` (JSONB).
+8.  **`symptom_logs`**: `id` (PK), `user_id` (FK), `symptom_name`, `intensity` (Integer 1-10), `pain_category` (String), `satiety_level` (Integer 1-10), `timestamp`.
+9.  **`lifestyle_logs` (Вместо water_logs)**: `id` (PK), `user_id` (FK), `water_ml`, `electrolytes` (Boolean), `light_exposure` (Integer - lux/spectrum), `thermal_stress` (String - sauna/ice), `cognitive_load_hours` (Float), `movement_minutes` (Integer - NEAT/Activity Snacks для Ramp-Up Protocol, НЕ попадает в `workouts_log`), `timestamp`.
+10. **`workouts_log`**: `id` (PK), `user_id` (FK), `date`, `workout_type` (String), `duration_minutes` (Integer), `stress_type` (String), `planned_workout` (JSONB), `actual_workout` (JSONB), `recovery_interventions` (JSONB), `training_effect` (Float), `training_load` (Float), `recovery_time_hours` (Integer).
+11. **`biomarker_logs`**: `id` (PK), `user_id` (FK), `biomarker_name` (String), `value` (Float), `unit` (String), `reference_min` (Float), `reference_max` (Float), `date_tested` (Date).
+12. **`ru_drugs_registry` (База ЕСКЛП)**: `id` (PK), `trade_name` (String - Торговое название), `inn` (String - МНН), `atc_code` (String - Класс АТХ). Наполняется офлайн-парсером CLI.

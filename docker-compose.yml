@@ -1,0 +1,51 @@
+services:
+  # ── Telegram Bot ──
+  bot:
+    build: .
+    container_name: silabro-bot
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./prompts:/opt/app/prompts:ro
+
+  # ── PostgreSQL (primary data store) ──
+  db:
+    image: postgres:15-alpine
+    container_name: silabro-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-silabro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silabro_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-silabro}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-silabro}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Redis (FSM storage, caching, UX-locks) ──
+  redis:
+    image: redis:alpine
+    container_name: silabro-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+    driver: local

@@ -1,0 +1,75 @@
+name: Tests & Coverage
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: silabro_test
+          POSTGRES_PASSWORD: test_secret
+          POSTGRES_DB: silabro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U silabro_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://silabro_test:test_secret@localhost:5432/silabro_test
+      REDIS_URL: redis://localhost:6379/0
+      BOT_TOKEN: fake-token-for-ci
+      GEMINI_API_KEY: fake-key-for-ci
+      FERNET_KEYS: dGVzdC1rZXktZm9yLWNpLXBpcGVsaW5l
+      LOG_LEVEL: WARNING
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system deps (WeasyPrint)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangocairo-1.0-0 libpangoft2-1.0-0 \
+            libgdk-pixbuf-2.0-0 libcairo2 libglib2.0-0 libffi-dev \
+            libxml2 libxslt1.1 shared-mime-info \
+            fonts-freefont-ttf fonts-dejavu-core
+
+      - name: Install Python dependencies
+        run: pip install --no-cache-dir ".[dev]"
+
+      - name: Run tests with coverage
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=80
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
